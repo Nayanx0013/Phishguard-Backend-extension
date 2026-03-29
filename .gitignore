@@ -1,0 +1,37 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# ── Environment ───────────────────────────────────────────────────────────────
+.env
+.env.local
+.env.production
+venv/
+.venv/
+env/
+
+# ── Database (local only — Railway uses fresh DB each deploy) ─────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Dataset (too large for git) ───────────────────────────────────────────────
+dataset/
+
+# ── OS / Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+
+
+model_backup.pkl

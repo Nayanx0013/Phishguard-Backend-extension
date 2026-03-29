@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>PhishGuard — Intelligence Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --c:#00f5ff;--g:#00ff88;--r:#ff3366;--a:#ffaa00;--p:#a855f7;
+  --bg:#040812;--bg2:#080f1e;--bg3:#0c1628;
+  --b:rgba(0,245,255,0.1);--bb:rgba(0,245,255,0.28);
+  --t:#e8f4ff;--t2:rgba(220,240,255,0.7);--t3:rgba(180,210,255,0.38);
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);font-family:'Rajdhani',sans-serif;color:var(--t);min-height:100vh;overflow-x:hidden}
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(rgba(0,245,255,0.022) 1px,transparent 1px),linear-gradient(90deg,rgba(0,245,255,0.022) 1px,transparent 1px);
+  background-size:44px 44px;
+}
+.orb{position:fixed;border-radius:50%;pointer-events:none;z-index:0;will-change:transform}
+.o1{width:480px;height:480px;top:-140px;right:-140px;background:radial-gradient(circle,rgba(0,245,255,0.09) 0%,transparent 70%);animation:of 10s ease-in-out infinite}
+.o2{width:560px;height:560px;bottom:-180px;left:-180px;background:radial-gradient(circle,rgba(168,85,247,0.07) 0%,transparent 70%);animation:of 14s ease-in-out infinite reverse}
+@keyframes of{0%,100%{transform:translate(0,0)}50%{transform:translate(18px,-18px)}}
+
+nav{
+  position:sticky;top:0;z-index:100;
+  background:rgba(4,8,18,0.92);backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--b);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 32px;min-height:62px;flex-wrap:wrap;gap:8px;
+  padding-top:10px;padding-bottom:10px;
+}
+nav::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--c),transparent);opacity:0.4}
+.nbrand{display:flex;align-items:center;gap:12px}
+.nlogo{width:38px;height:38px;border-radius:9px;background:linear-gradient(135deg,rgba(0,245,255,0.18),rgba(168,85,247,0.18));border:1px solid var(--bb);display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 18px rgba(0,245,255,0.25)}
+.ntitle{font-family:'Orbitron',monospace;font-size:14px;font-weight:900;color:var(--c);letter-spacing:3px;text-shadow:0 0 14px rgba(0,245,255,0.4)}
+.nsub{font-size:9px;color:var(--t3);letter-spacing:3px;font-weight:700;margin-top:1px}
+.nbadges{display:flex;gap:7px;flex-wrap:wrap;max-width:60%;justify-content:flex-end}
+.nb{display:flex;align-items:center;gap:5px;padding:4px 11px;border-radius:20px;border:1px solid;font-family:'Orbitron',monospace;font-size:8px;font-weight:700;letter-spacing:1px}
+.nb-c{background:rgba(0,245,255,0.07);border-color:rgba(0,245,255,0.28);color:var(--c)}
+.nb-p{background:rgba(168,85,247,0.07);border-color:rgba(168,85,247,0.28);color:var(--p)}
+.nb-a{background:rgba(255,170,0,0.07);border-color:rgba(255,170,0,0.28);color:var(--a)}
+.nb-g{background:rgba(0,255,136,0.07);border-color:rgba(0,255,136,0.28);color:var(--g)}
+.nb-r{background:rgba(255,51,102,0.07);border-color:rgba(255,51,102,0.28);color:var(--r)}
+.nd{width:5px;height:5px;border-radius:50%;background:currentColor;box-shadow:0 0 5px currentColor;animation:dp 1.6s ease-in-out infinite}
+@keyframes dp{0%,100%{opacity:1}50%{opacity:0.25}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes ico{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+
+.wrap{position:relative;z-index:1;padding:36px 32px;max-width:1380px;margin:0 auto}
+.hero{margin-bottom:32px}
+.hero h1{font-family:'Orbitron',monospace;font-size:38px;font-weight:900;line-height:1.1;margin-bottom:8px;background:linear-gradient(135deg,#e8f4ff 0%,var(--c) 55%,var(--p) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero p{font-size:13px;color:var(--t2);font-weight:700;letter-spacing:1px}
+
+.spills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:28px}
+.sp{display:flex;align-items:center;gap:7px;background:var(--bg2);border:1px solid var(--b);border-radius:9px;padding:9px 14px;transition:border-color .18s}
+.sp:hover{border-color:var(--bb)}
+.spdot{width:7px;height:7px;border-radius:50%}
+.spdot.on{background:var(--g);box-shadow:0 0 7px var(--g);animation:dp 1.6s infinite}
+.spdot.off{background:var(--r);box-shadow:0 0 7px var(--r)}
+.spdot.warn{background:var(--a);box-shadow:0 0 7px var(--a)}
+.splbl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--t2);letter-spacing:1px}
+.spval{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--c)}
+.spval.red{color:var(--r)}
+.spval.amber{color:var(--a)}
+
+.sgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.sc{background:var(--bg2);border:1px solid var(--b);border-radius:14px;padding:22px 18px;position:relative;overflow:hidden;transition:transform .18s,box-shadow .18s;cursor:default}
+.sc:hover{transform:translateY(-3px)}
+.sc::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--ac,var(--c)),transparent)}
+.sc::after{content:'';position:absolute;inset:0;background:radial-gradient(circle at 85% 15%,rgba(var(--ar,0,245,255),0.055),transparent 60%);pointer-events:none}
+.sc-c{--ac:var(--c);--ar:0,245,255}.sc-c:hover{box-shadow:0 6px 32px rgba(0,245,255,0.08)}
+.sc-r{--ac:var(--r);--ar:255,51,102}.sc-r:hover{box-shadow:0 6px 32px rgba(255,51,102,0.08)}
+.sc-g{--ac:var(--g);--ar:0,255,136}.sc-g:hover{box-shadow:0 6px 32px rgba(0,255,136,0.08)}
+.sc-a{--ac:var(--a);--ar:255,170,0}.sc-a:hover{box-shadow:0 6px 32px rgba(255,170,0,0.08)}
+.scico{width:40px;height:40px;border-radius:9px;background:rgba(var(--ar,0,245,255),0.1);border:1px solid rgba(var(--ar,0,245,255),0.2);display:flex;align-items:center;justify-content:center;font-size:18px;margin-bottom:14px;position:relative;z-index:1;animation:ico 3.5s ease-in-out infinite}
+.sc:nth-child(2) .scico{animation-delay:.6s}
+.sc:nth-child(3) .scico{animation-delay:1.2s}
+.sc:nth-child(4) .scico{animation-delay:1.8s}
+.scn{font-family:'Orbitron',monospace;font-size:36px;font-weight:900;color:var(--ac,var(--c));text-shadow:0 0 18px rgba(var(--ar,0,245,255),0.45);line-height:1;margin-bottom:6px;position:relative;z-index:1}
+.scl{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--t3);letter-spacing:3px;position:relative;z-index:1}
+.scs{font-size:11px;color:var(--t3);margin-top:4px;position:relative;z-index:1;font-weight:700}
+
+/* ── Quick Scan ─────────────────────────────────────────────────────────── */
+.sform{background:var(--bg2);border:1px solid var(--b);border-radius:14px;padding:22px;margin-bottom:24px;position:relative;overflow:hidden}
+.sform::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--g),transparent);opacity:0.45}
+.sform-title{font-family:'Orbitron',monospace;font-size:10px;font-weight:700;color:var(--t2);letter-spacing:3px;margin-bottom:14px}
+.srow{display:flex;gap:10px}
+.sinp{flex:1;background:var(--bg3);border:1px solid var(--bb);color:var(--t);padding:12px 16px;border-radius:9px;font-family:'Rajdhani',sans-serif;font-size:13px;font-weight:700;outline:none;transition:border-color .18s,box-shadow .18s}
+.sinp:focus{border-color:var(--c);box-shadow:0 0 0 3px rgba(0,245,255,0.1)}
+.sinp::placeholder{color:var(--t3)}
+.sbtn{padding:12px 22px;border-radius:9px;background:linear-gradient(135deg,rgba(0,245,255,0.12),rgba(0,255,136,0.08));border:1px solid var(--bb);color:var(--c);font-family:'Orbitron',monospace;font-size:9px;font-weight:700;cursor:pointer;transition:all .18s;letter-spacing:2px;white-space:nowrap}
+.sbtn:hover{background:rgba(0,245,255,0.18);box-shadow:0 0 18px rgba(0,245,255,0.25)}
+.sres{margin-top:14px;padding:14px 16px;border-radius:9px;background:var(--bg3);border:1px solid var(--b);display:none}
+.sres.show{display:block}
+/* Risk badge */
+.risk-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-family:'Orbitron',monospace;font-size:8px;font-weight:700;letter-spacing:1px;margin-left:10px}
+.risk-CRITICAL{background:rgba(255,51,102,0.15);color:var(--r);border:1px solid rgba(255,51,102,0.35)}
+.risk-HIGH{background:rgba(255,100,0,0.15);color:#ff6400;border:1px solid rgba(255,100,0,0.35)}
+.risk-MEDIUM{background:rgba(255,170,0,0.15);color:var(--a);border:1px solid rgba(255,170,0,0.35)}
+.risk-LOW{background:rgba(255,200,0,0.12);color:#ffd000;border:1px solid rgba(255,200,0,0.3)}
+.risk-SAFE{background:rgba(0,255,136,0.08);color:var(--g);border:1px solid rgba(0,255,136,0.28)}
+/* Reasons list */
+.reasons-list{margin-top:10px;padding:0;list-style:none}
+.reasons-list li{font-size:11px;color:var(--t2);font-weight:700;padding:3px 0 3px 14px;position:relative}
+.reasons-list li::before{content:'›';position:absolute;left:0;color:var(--r);font-weight:900}
+/* Feedback buttons */
+.fb-row{display:flex;gap:8px;margin-top:12px;align-items:center}
+.fb-lbl{font-family:'Orbitron',monospace;font-size:8px;color:var(--t3);letter-spacing:1px;font-weight:700}
+.fb-btn{padding:5px 13px;border-radius:7px;font-family:'Orbitron',monospace;font-size:8px;font-weight:700;cursor:pointer;transition:all .18s;letter-spacing:1px;border:1px solid}
+.fb-safe{background:rgba(0,255,136,0.08);border-color:rgba(0,255,136,0.28);color:var(--g)}
+.fb-safe:hover{background:rgba(0,255,136,0.18)}
+.fb-phish{background:rgba(255,51,102,0.08);border-color:rgba(255,51,102,0.28);color:var(--r)}
+.fb-phish:hover{background:rgba(255,51,102,0.18)}
+
+.crow{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:24px}
+.cc{background:var(--bg2);border:1px solid var(--b);border-radius:14px;padding:22px;position:relative;overflow:hidden}
+.cc::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--c),transparent);opacity:0.4}
+.chead{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:18px}
+.ctitle{font-family:'Orbitron',monospace;font-size:10px;font-weight:700;color:var(--t2);letter-spacing:3px}
+.cleg{display:flex;gap:14px;margin-top:7px}
+.cli{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t2);font-weight:700}
+.cld{width:8px;height:8px;border-radius:50%}
+.rbtn{display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--bb);color:var(--c);padding:6px 13px;border-radius:7px;font-family:'Orbitron',monospace;font-size:8px;font-weight:700;cursor:pointer;transition:all .18s;letter-spacing:1px;white-space:nowrap}
+.rbtn:hover{background:rgba(0,245,255,0.1);box-shadow:0 0 10px rgba(0,245,255,0.2)}
+.rspin{display:inline-block;transition:transform .35s}
+.rbtn:hover .rspin{transform:rotate(180deg)}
+.ch{position:relative;width:100%;height:240px}
+
+.dcard{background:var(--bg2);border:1px solid var(--b);border-radius:14px;padding:22px;margin-bottom:24px;position:relative;overflow:hidden}
+.dcard::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--a),transparent);opacity:0.45}
+.drow{margin-bottom:12px}
+.drow:last-child{margin-bottom:0}
+.dinfo{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.dname{font-size:13px;font-weight:700;color:var(--t2)}
+.dcnt{font-family:'Orbitron',monospace;font-size:12px;font-weight:900;color:var(--r)}
+.dtrack{height:3px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.dfill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--r),var(--a));box-shadow:0 0 7px rgba(255,51,102,0.35);transition:width 1.2s ease}
+
+.tcard{background:var(--bg2);border:1px solid var(--b);border-radius:14px;overflow:hidden;margin-bottom:24px;position:relative}
+.tcard::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--r),transparent);opacity:0.45}
+.thead2{padding:18px 22px;border-bottom:1px solid var(--b);display:flex;align-items:center;justify-content:space-between}
+.ttitle{font-family:'Orbitron',monospace;font-size:10px;font-weight:700;color:var(--t2);letter-spacing:3px}
+.tcnt{font-family:'Orbitron',monospace;font-size:8px;color:var(--r);background:rgba(255,51,102,0.1);border:1px solid rgba(255,51,102,0.28);padding:3px 10px;border-radius:20px;letter-spacing:1px;font-weight:700}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{padding:10px 22px;text-align:left;font-family:'Orbitron',monospace;font-size:8px;font-weight:700;color:var(--t3);letter-spacing:3px;border-bottom:1px solid var(--b);background:rgba(0,0,0,0.15)}
+.tbl td{padding:12px 22px;border-bottom:1px solid rgba(0,245,255,0.04);font-weight:700;font-size:13px}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:rgba(0,245,255,0.025)}
+.tu{font-size:11px;color:var(--t2);font-weight:700;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tv{font-family:'Orbitron',monospace;font-size:8px;font-weight:700;padding:3px 9px;border-radius:4px;display:inline-block;letter-spacing:1px}
+.tv.PHISHING{background:rgba(255,51,102,0.1);color:var(--r);border:1px solid rgba(255,51,102,0.28)}
+.tv.SAFE{background:rgba(0,255,136,0.08);color:var(--g);border:1px solid rgba(0,255,136,0.28)}
+.tconf{font-family:'Orbitron',monospace;font-size:12px;font-weight:900}
+.tmod{font-size:11px;color:var(--t3);font-weight:700}
+.tts{font-size:10px;color:var(--t3);font-weight:700}
+
+.rcard{background:var(--bg2);border:1px solid var(--b);border-radius:14px;padding:22px;margin-bottom:24px;position:relative;overflow:hidden}
+.rcard::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--p),transparent);opacity:0.45}
+.rgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.ri{background:var(--bg3);border:1px solid var(--b);border-radius:9px;padding:14px;text-align:center;transition:border-color .18s}
+.ri:hover{border-color:var(--bb)}
+.rin{font-family:'Orbitron',monospace;font-size:22px;font-weight:900;color:var(--p);text-shadow:0 0 12px rgba(168,85,247,0.45)}
+.ril{font-family:'Orbitron',monospace;font-size:8px;color:var(--t3);letter-spacing:2px;margin-top:4px;font-weight:700}
+.rtbtn{margin-top:14px;padding:10px 22px;border-radius:9px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.28);color:var(--p);font-family:'Orbitron',monospace;font-size:9px;font-weight:700;cursor:pointer;transition:all .18s;letter-spacing:2px}
+.rtbtn:hover{background:rgba(168,85,247,0.2);box-shadow:0 0 18px rgba(168,85,247,0.25)}
+
+footer{border-top:1px solid var(--b);padding:22px 32px;display:flex;align-items:center;justify-content:space-between;position:relative;z-index:1}
+footer::before{content:'';position:absolute;top:-1px;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--c),transparent);opacity:0.3}
+.fbrand{font-family:'Orbitron',monospace;font-size:9px;color:var(--t3);letter-spacing:3px;font-weight:700}
+.flinks{display:flex;gap:14px}
+.flink{font-family:'Orbitron',monospace;font-size:8px;color:var(--t3);letter-spacing:2px;text-decoration:none;transition:color .18s;font-weight:700}
+.flink:hover{color:var(--c)}
+
+.rings{display:inline-flex;align-items:center;justify-content:center;position:relative;width:22px;height:22px;vertical-align:middle;margin-right:8px}
+.rg{position:absolute;border-radius:50%;border:1.5px solid transparent}
+.rg1{inset:0;border-top-color:var(--c);animation:spin .7s linear infinite}
+.rg2{inset:5px;border-bottom-color:var(--p);animation:spin .45s linear infinite reverse}
+.rc{width:5px;height:5px;border-radius:50%;background:var(--c);box-shadow:0 0 7px var(--c)}
+
+/* Circuit breaker warning banner */
+.cb-warn{background:rgba(255,170,0,0.08);border:1px solid rgba(255,170,0,0.25);border-radius:9px;padding:10px 16px;margin-bottom:16px;font-family:'Orbitron',monospace;font-size:9px;color:var(--a);letter-spacing:1px;font-weight:700;display:none}
+.cb-warn.show{display:block}
+
+@media(max-width:1024px){.sgrid{grid-template-columns:repeat(2,1fr)}.crow{grid-template-columns:1fr}.nbadges{max-width:100%}}
+@media(max-width:600px){.sgrid{grid-template-columns:1fr}.wrap{padding:20px 14px}.hero h1{font-size:26px}.nbadges{max-width:100%;gap:5px}.nb{font-size:7px;padding:3px 8px}}
+</style>
+</head>
+<body>
+<div class="o1 orb"></div>
+<div class="o2 orb"></div>
+
+<nav>
+  <div class="nbrand">
+    <div class="nlogo">🛡️</div>
+    <div>
+      <div class="ntitle">PHISHGUARD</div>
+      <div class="nsub">BY NAYAN GHOSH · THREAT INTELLIGENCE</div>
+    </div>
+  </div>
+  <div class="nbadges">
+    <div class="nb nb-c"><span class="nd"></span>RF MODEL</div>
+    <div class="nb nb-p"><span class="nd"></span>NEURAL NET</div>
+    <div class="nb nb-a"><span class="nd"></span>VIRUSTOTAL</div>
+    <div class="nb nb-g"><span class="nd"></span>GSB</div>
+    <div class="nb nb-g"><span class="nd"></span>LIVE · AUTO 30S</div>
+  </div>
+</nav>
+
+<div class="wrap">
+
+  <div class="hero">
+    <h1>Threat Intelligence<br>Dashboard.</h1>
+    <p>Real-time phishing detection · Ensemble ML · Multi-source threat feeds · v5.0</p>
+  </div>
+
+  <!-- Circuit breaker warnings -->
+  {% if vt_circuit_open %}
+  <div class="cb-warn show">⚡ VIRUSTOTAL CIRCUIT BREAKER OPEN — API may be down or quota exceeded. VT checks temporarily suspended.</div>
+  {% endif %}
+  {% if gsb_circuit_open %}
+  <div class="cb-warn show">⚡ GOOGLE SAFE BROWSING CIRCUIT BREAKER OPEN — GSB API may be down. GSB checks temporarily suspended.</div>
+  {% endif %}
+
+  <!-- Status pills -->
+  <div class="spills">
+    <div class="sp"><div class="spdot {{ 'on' if rf_loaded else 'off' }}"></div><span class="splbl">RF MODEL</span><span class="spval {{ '' if rf_loaded else 'red' }}">{{ 'ONLINE' if rf_loaded else 'OFFLINE' }}</span></div>
+    <div class="sp"><div class="spdot {{ 'on' if lstm_loaded else 'off' }}"></div><span class="splbl">NEURAL NET</span><span class="spval {{ '' if lstm_loaded else 'red' }}">{{ 'ONLINE' if lstm_loaded else 'OFFLINE' }}</span></div>
+    <div class="sp"><div class="spdot {{ 'warn' if vt_circuit_open else ('on' if vt_enabled else 'off') }}"></div><span class="splbl">VIRUSTOTAL</span><span class="spval {{ 'amber' if vt_circuit_open else ('' if vt_enabled else 'red') }}">{{ 'CIRCUIT OPEN' if vt_circuit_open else ('ENABLED' if vt_enabled else 'NO KEY') }}</span></div>
+    <div class="sp"><div class="spdot {{ 'warn' if gsb_circuit_open else ('on' if gsb_enabled else 'off') }}"></div><span class="splbl">GOOGLE GSB</span><span class="spval {{ 'amber' if gsb_circuit_open else ('' if gsb_enabled else 'red') }}">{{ 'CIRCUIT OPEN' if gsb_circuit_open else ('ENABLED' if gsb_enabled else 'NO KEY') }}</span></div>
+    <div class="sp"><div class="spdot on"></div><span class="splbl">THREAT FEEDS</span><span class="spval">10 SOURCES</span></div>
+    <div class="sp"><div class="spdot on"></div><span class="splbl">AUTO RETRAIN</span><span class="spval">30 MIN</span></div>
+  </div>
+
+  <!-- Stats cards -->
+  <div class="sgrid">
+    <div class="sc sc-c"><div class="scico">📡</div><div class="scn">{{ total }}</div><div class="scl">TOTAL SCANS</div><div class="scs">All time</div></div>
+    <div class="sc sc-r"><div class="scico">🚨</div><div class="scn">{{ phishing }}</div><div class="scl">THREATS BLOCKED</div><div class="scs">Phishing caught</div></div>
+    <div class="sc sc-g"><div class="scico">✅</div><div class="scn">{{ safe }}</div><div class="scl">CLEAN SITES</div><div class="scs">Verified safe</div></div>
+    <div class="sc sc-a"><div class="scico">📊</div><div class="scn">{{ ((phishing / total * 100)|round(1)) if total > 0 else 0 }}%</div><div class="scl">THREAT RATE</div><div class="scs">Of all scans</div></div>
+  </div>
+
+  <!-- Quick Scan -->
+  <div class="sform">
+    <div class="sform-title">⚡ SCAN A URL</div>
+    <div class="srow">
+      <input class="sinp" id="si" placeholder="https://example.com" type="url"/>
+      <button class="sbtn" onclick="doScan()">⚡ SCAN NOW</button>
+    </div>
+    <div class="sres" id="sr"></div>
+  </div>
+
+  <!-- Charts -->
+  <div class="crow">
+    <div class="cc">
+      <div class="chead">
+        <div>
+          <div class="ctitle">DAILY ACTIVITY — LAST 7 DAYS</div>
+          <div class="cleg">
+            <div class="cli"><div class="cld" style="background:var(--g);box-shadow:0 0 5px var(--g)"></div>Safe</div>
+            <div class="cli"><div class="cld" style="background:var(--r);box-shadow:0 0 5px var(--r)"></div>Phishing</div>
+          </div>
+        </div>
+        <button class="rbtn" onclick="location.reload()"><span class="rspin">↻</span> REFRESH</button>
+      </div>
+      <div class="ch"><canvas id="ac"></canvas></div>
+    </div>
+    <div class="cc">
+      <div class="chead">
+        <div>
+          <div class="ctitle">THREAT BREAKDOWN</div>
+          <div class="cleg">
+            <div class="cli"><div class="cld" style="background:var(--g)"></div>Safe</div>
+            <div class="cli"><div class="cld" style="background:var(--r)"></div>Phishing</div>
+          </div>
+        </div>
+      </div>
+      <div class="ch"><canvas id="dc"></canvas></div>
+    </div>
+  </div>
+
+  {% if top_domains %}
+  <div class="dcard">
+    <div class="chead">
+      <div class="ctitle">TOP PHISHING DOMAINS</div>
+      <div class="tcnt">{{ top_domains|length }} DOMAINS</div>
+    </div>
+    {% set mx = top_domains[0][1] if top_domains else 1 %}
+    {% for domain, cnt in top_domains %}
+    <div class="drow">
+      <div class="dinfo"><span class="dname">{{ domain }}</span><span class="dcnt">{{ cnt }}</span></div>
+      <div class="dtrack"><div class="dfill" style="width:{{ (cnt/mx*100)|int }}%"></div></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Scan History -->
+  <div class="tcard">
+    <div class="thead2">
+      <div class="ttitle">RECENT SCAN HISTORY</div>
+      <div class="tcnt">LAST {{ recent|length }} SCANS</div>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>URL</th><th>VERDICT</th><th>CONF</th>
+            <th>RF MODEL</th><th>VT RATIO</th><th>TIMESTAMP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recent %}
+          <tr>
+            <td><div class="tu" title="{{ row[0] }}">{{ row[0] }}</div></td>
+            <td><span class="tv {{ row[1] }}">{{ row[1] }}</span></td>
+            <td><span class="tconf" style="color:{{ 'var(--r)' if row[1]=='PHISHING' else 'var(--g)' }}">{{ row[5] or 0 }}%</span></td>
+            <td><span class="tmod">{{ row[2] or 'N/A' }}</span></td>
+            <td><span class="tmod">{{ row[6] or 'N/A' }}</span></td>
+            <td><span class="tts">{{ row[7][:16] if row[7] else '—' }}</span></td>
+          </tr>
+          {% endfor %}
+          {% if not recent %}
+          <tr><td colspan="6" style="text-align:center;padding:30px;color:var(--t3);font-family:'Orbitron',monospace;font-size:9px;letter-spacing:2px;font-weight:700">NO SCANS YET — START SCANNING TO SEE DATA</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Auto-retrain -->
+  <div class="rcard">
+    <div class="chead">
+      <div class="ctitle">AUTO-RETRAIN ENGINE</div>
+      <div class="nb nb-g"><span class="nd"></span>WATCHING</div>
+    </div>
+    <div class="rgrid">
+      <div class="ri"><div class="rin" id="rt1">—</div><div class="ril">SAFE REPORTS</div></div>
+      <div class="ri"><div class="rin" id="rt2">—</div><div class="ril">PHISHING REPORTS</div></div>
+      <div class="ri"><div class="rin" id="rt3">—</div><div class="ril">LAST ACCURACY</div></div>
+    </div>
+    <button class="rtbtn" onclick="doRetrain()">⚡ TRIGGER RETRAIN</button>
+  </div>
+
+</div>
+
+<footer>
+  <div class="fbrand">PHISHGUARD v5.0 · BY NAYAN GHOSH</div>
+  <div class="flinks">
+    <a href="/health"            class="flink">HEALTH</a>
+    <a href="/metrics"           class="flink">METRICS</a>
+    <a href="/"                  class="flink">API STATUS</a>
+    <a href="/history?limit=100" class="flink">HISTORY</a>
+    <a href="/retrain/status"    class="flink">RETRAIN STATUS</a>
+    <a href="/stats"             class="flink">STATS JSON</a>
+  </div>
+</footer>
+
+<script>
+var D={
+  daily:{{ daily|tojson }},
+  total:{{ total|tojson }},
+  phish:{{ phishing|tojson }},
+  safe:{{ safe|tojson }}
+};
+var labels     = D.daily.map(function(d){return d[0]});
+var safeCounts = D.daily.map(function(d){return Math.max(0,(d[1]||0)-(d[2]||0))});
+var phishCounts= D.daily.map(function(d){return d[2]||0});
+
+var TT={
+  backgroundColor:'rgba(8,15,30,0.96)',borderColor:'rgba(0,245,255,0.22)',borderWidth:1,
+  titleColor:'#00f5ff',titleFont:{family:'Orbitron',size:9,weight:'bold'},
+  bodyColor:'#e8f4ff',bodyFont:{family:'Rajdhani',size:12,weight:'bold'},padding:12
+};
+
+new Chart(document.getElementById('ac'),{
+  type:'bar',
+  data:{labels:labels,datasets:[
+    {label:'Safe',   data:safeCounts, backgroundColor:'rgba(0,255,136,0.22)',borderColor:'rgba(0,255,136,0.75)',borderWidth:1,borderRadius:5},
+    {label:'Phishing',data:phishCounts,backgroundColor:'rgba(255,51,102,0.22)',borderColor:'rgba(255,51,102,0.75)',borderWidth:1,borderRadius:5}
+  ]},
+  options:{responsive:true,maintainAspectRatio:false,animation:{duration:500},
+    plugins:{legend:{display:false},tooltip:TT},
+    scales:{
+      x:{grid:{color:'rgba(0,245,255,0.04)'},ticks:{color:'rgba(180,210,255,0.45)',font:{size:10,weight:'bold'}}},
+      y:{grid:{color:'rgba(0,245,255,0.04)'},ticks:{color:'rgba(180,210,255,0.45)',font:{size:10,weight:'bold'}},beginAtZero:true}
+    }}
+});
+
+new Chart(document.getElementById('dc'),{
+  type:'doughnut',
+  data:{labels:['Safe','Phishing'],datasets:[{
+    data:D.safe>0||D.phish>0?[D.safe,D.phish]:[1,0],
+    backgroundColor:['rgba(0,255,136,0.18)','rgba(255,51,102,0.18)'],
+    borderColor:['rgba(0,255,136,0.75)','rgba(255,51,102,0.75)'],
+    borderWidth:2,hoverOffset:10
+  }]},
+  options:{responsive:true,maintainAspectRatio:false,cutout:'68%',animation:{duration:500},
+    plugins:{legend:{display:false},tooltip:TT}}
+});
+
+fetch('/retrain/status')
+  .then(function(r){return r.json()})
+  .then(function(d){
+    document.getElementById('rt1').textContent=d.pending_safe_reports||0;
+    document.getElementById('rt2').textContent=d.pending_phishing_reports||0;
+    var a=d.last_retrain_info&&d.last_retrain_info.accuracy;
+    document.getElementById('rt3').textContent=a?(a*100).toFixed(1)+'%':'N/A';
+  }).catch(function(){});
+
+// ── Quick Scan ────────────────────────────────────────────────────────────────
+var _lastScanUrl='', _lastScanResult='';
+
+function doScan(){
+  var url=document.getElementById('si').value.trim();
+  if(!url)return;
+  _lastScanUrl=url;
+  var box=document.getElementById('sr');
+  box.className='sres show';
+  box.innerHTML='<div style="display:flex;align-items:center;color:var(--c);font-family:Rajdhani,sans-serif;font-size:13px;font-weight:700"><div class="rings"><div class="rg rg1"></div><div class="rg rg2"></div><div class="rc"></div></div>Scanning '+url.substring(0,60)+'…</div>';
+  fetch('/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:url})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    _lastScanResult=d.result;
+    var p   = d.result==='PHISHING';
+    var col = p?'var(--r)':'var(--g)';
+    var glo = p?'rgba(255,51,102,0.35)':'rgba(0,255,136,0.35)';
+    box.style.borderColor = p?'rgba(255,51,102,0.28)':'rgba(0,255,136,0.28)';
+    var rf  = (d.models&&d.models.random_forest)||'N/A';
+    var nn  = (d.models&&d.models.lstm)||'N/A';
+    var gsb = (d.models&&d.models.google_safebrowsing)||'N/A';
+    var vtr = (d.virustotal&&d.virustotal.vt_ratio)||'N/A';
+    var risk= d.risk||{};
+    var cached = d.cached?'<span style="font-family:Orbitron,monospace;font-size:8px;color:var(--t3);margin-left:8px">CACHED</span>':'';
+
+    // Reasons
+    var reasonsHtml='';
+    if(d.reasons&&d.reasons.length){
+      reasonsHtml='<ul class="reasons-list">'+d.reasons.map(function(r){return'<li>'+r+'</li>'}).join('')+'</ul>';
+    }
+
+    box.innerHTML=
+      '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'+
+        '<div>'+
+          '<span style="font-family:Orbitron,monospace;font-size:14px;font-weight:900;color:'+col+';text-shadow:0 0 12px '+glo+';letter-spacing:2px">'+(p?'⚠ PHISHING DETECTED':'✓ SITE IS SAFE')+'</span>'+
+          '<span class="risk-badge risk-'+(risk.level||'SAFE')+'">'+(risk.emoji||'')+' '+(risk.label||d.result)+'</span>'+
+          cached+
+          '<div style="font-size:12px;color:var(--t2);margin-top:6px;font-weight:700;word-break:break-all">'+url.substring(0,80)+'</div>'+
+        '</div>'+
+        '<div style="font-family:Orbitron,monospace;font-size:24px;font-weight:900;color:'+col+';text-shadow:0 0 14px '+glo+'">'+(d.confidence||0)+'%</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:18px;margin-top:10px;flex-wrap:wrap">'+
+        '<span style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--t3)">RF: <span style="color:'+(rf==='PHISHING'?'var(--r)':'var(--g)')+'">'+rf+'</span></span>'+
+        '<span style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--t3)">NN: <span style="color:'+(nn==='PHISHING'?'var(--r)':(nn==='unavailable'?'var(--t3)':'var(--g)'))+'">'+nn+'</span></span>'+
+        '<span style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--t3)">VT: <span style="color:'+((d.virustotal&&d.virustotal.positives>0)?'var(--r)':'var(--g)')+'">'+vtr+'</span></span>'+
+        '<span style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--t3)">GSB: <span style="color:'+(gsb==='PHISHING'?'var(--r)':(gsb==='UNAVAILABLE'?'var(--t3)':'var(--g)'))+'">'+gsb+'</span></span>'+
+        '<span style="font-family:Orbitron,monospace;font-size:9px;font-weight:700;color:var(--t3)">SCORE: <span style="color:var(--c)">'+(d.weighted_score||0)+'</span></span>'+
+      '</div>'+
+      reasonsHtml+
+      '<div class="fb-row">'+
+        '<span class="fb-lbl">WRONG VERDICT?</span>'+
+        '<button class="fb-btn fb-safe"  onclick="sendFeedback(\'safe\')"   >✓ MARK SAFE</button>'+
+        '<button class="fb-btn fb-phish" onclick="sendFeedback(\'phishing\')">⚠ MARK PHISHING</button>'+
+      '</div>';
+  })
+  .catch(function(){
+    box.innerHTML='<span style="color:var(--r);font-family:Orbitron,monospace;font-size:11px;font-weight:700">⚠ BACKEND OFFLINE — RUN: python app.py</span>';
+    box.style.borderColor='rgba(255,51,102,0.28)';
+  });
+}
+
+// ── Feedback ──────────────────────────────────────────────────────────────────
+function sendFeedback(correctLabel){
+  if(!_lastScanUrl) return;
+  fetch('/feedback',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({url:_lastScanUrl,correct_label:correctLabel,reported_label:_lastScanResult})
+  })
+  .then(function(r){return r.json()})
+  .then(function(d){
+    var row=document.querySelector('.fb-row');
+    if(row) row.innerHTML='<span style="font-family:Orbitron,monospace;font-size:9px;color:var(--g);font-weight:700">✓ '+d.message+'</span>';
+  })
+  .catch(function(){});
+}
+
+document.getElementById('si').addEventListener('keydown',function(e){if(e.key==='Enter')doScan()});
+
+// ── Retrain Trigger ───────────────────────────────────────────────────────────
+function doRetrain(){
+  var b=document.querySelector('.rtbtn');
+  b.textContent='⏳ RETRAINING…';b.disabled=true;
+  fetch('/retrain/trigger',{method:'POST'})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      b.textContent=d.status==='triggered'?'✓ RETRAIN STARTED':'⚠ '+d.message;
+      setTimeout(function(){b.textContent='⚡ TRIGGER RETRAIN';b.disabled=false},3000);
+    }).catch(function(){b.textContent='⚠ OFFLINE';setTimeout(function(){b.textContent='⚡ TRIGGER RETRAIN';b.disabled=false},3000)});
+}
+
+/* AUTO REFRESH 30s */
+setTimeout(function(){location.reload()},30000);
+</script>
+</body>
+</html>
