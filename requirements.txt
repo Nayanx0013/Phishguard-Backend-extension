@@ -12,4 +12,3 @@ dnspython>=2.4.0
 onnxruntime==1.17.3
 gunicorn
 beautifulsoup4>=4.12.0
-libsql-experimental>=0.0.37
