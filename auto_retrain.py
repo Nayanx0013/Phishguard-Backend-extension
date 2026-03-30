@@ -5,7 +5,7 @@ import time
 import pickle
 import numpy as np
 from datetime import datetime
-from urllib.parse import urlparse   # FIX: moved to top — was imported inside loops
+from urllib.parse import urlparse   
 
 # ── Thresholds ────────────────────────────────────────────────────────────────
 SAFE_REPORT_THRESHOLD      = 3
@@ -13,15 +13,13 @@ PHISHING_REPORT_THRESHOLD  = 2
 CHECK_INTERVAL_MINUTES     = 30
 MIN_NEW_REPORTS_TO_RETRAIN = 5
 
-# New model must achieve at least this accuracy to replace the current one
+
 MIN_ACCURACY_TO_REPLACE    = 0.88
 
 DB = "scans.db"
 
 
-# FIX: Use a shared get_db() that respects Turso when configured,
-# instead of always hardcoding sqlite3.connect(DB).
-# If app.py defines get_db, we import it; otherwise fall back to local SQLite.
+
 def get_db():
     try:
         from app import get_db as app_get_db
@@ -95,9 +93,9 @@ def process_new_reports():
                 print(f"✅ Verified SAFE ({cnt} reports): {url[:60]}")
 
         elif label == "phishing" and cnt >= PHISHING_REPORT_THRESHOLD:
-            # FIX: Also check for conflicting safe reports before verifying as phishing
-            #      Previously this was missing — 10 safe reports + 2 phishing would
-            #      still get marked as verified phishing
+            
+            
+            
             safe_count = conn.execute(
                 "SELECT COUNT(*) FROM reports WHERE url=? AND label='safe'", (url,)
             ).fetchone()[0]
@@ -213,8 +211,8 @@ def retrain_model(new_verified_urls, reload_callback=None):
                 flist = features_to_list(feats)
                 y_val = 0 if label.lower() == "safe" else 1
 
-                # FIX: Balanced multiplier — both classes now get 5x weight
-                # Previously safe=3x, phishing=5x which biased model toward false positives
+                
+                
                 multiplier = 5
                 for _ in range(multiplier):
                     extra_X.append(flist)
@@ -254,7 +252,7 @@ def retrain_model(new_verified_urls, reload_callback=None):
         accuracy = accuracy_score(y_te, y_pred)
         print(f"  New model accuracy: {accuracy * 100:.2f}%")
 
-        # Accuracy gating — only replace if new model is good enough
+        
         if accuracy < MIN_ACCURACY_TO_REPLACE:
             print(f"  ⚠️  Accuracy {accuracy:.2%} below threshold {MIN_ACCURACY_TO_REPLACE:.2%}")
             print("  Keeping existing model — new model not good enough")
@@ -267,7 +265,7 @@ def retrain_model(new_verified_urls, reload_callback=None):
             conn.close()
             return False, accuracy
 
-        # Backup old model before replacing
+        
         if os.path.exists("model.pkl"):
             os.rename("model.pkl", "model_backup.pkl")
             print("  Old model backed up → model_backup.pkl")
@@ -343,7 +341,7 @@ class AutoRetrainWatcher:
             print(f"  New verified SAFE domains: {len(new_safe)}")
             for url in new_safe:
                 try:
-                    # FIX: urlparse now imported at top, not re-imported here
+                    
                     domain = urlparse(url).netloc.lower().replace("www.", "")
                     if domain:
                         self.dynamic_whitelist.add(domain)

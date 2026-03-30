@@ -37,7 +37,7 @@ except ImportError:
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    handlers=[logging.StreamHandler()],   # stdout only — HF Spaces has no persistent log files
+    handlers=[logging.StreamHandler()],   
 )
 log = logging.getLogger("phishguard")
 

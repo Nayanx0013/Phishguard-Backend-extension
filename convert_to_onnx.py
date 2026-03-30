@@ -1,11 +1,4 @@
-# convert_to_onnx.py v2 - Run ONCE locally to convert your PyTorch model to ONNX
-# ─────────────────────────────────────────────────────────────────────────────
-# Requirements (local only, NOT needed on Render):
-#   pip install torch onnx onnxruntime
-#
-# Run: python convert_to_onnx.py
-# Output: phishnet.onnx  (commit this to your repo)
-# ─────────────────────────────────────────────────────────────────────────────
+
 
 import os
 import pickle
