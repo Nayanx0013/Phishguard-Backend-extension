@@ -1,5 +1,3 @@
-
-
 import os
 import pickle
 import threading
@@ -76,11 +74,6 @@ log.info(f"Admin:   {'set'    if _key_ok(ADMIN_API_KEY) else 'NOT SET'}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TURSO DATABASE
-# Free cloud SQLite — persists across HF Space restarts/redeploys.
-# Sign up free at turso.tech, create a DB, then set in HF Space secrets:
-#   TURSO_URL   = libsql+wss://yourdb.turso.io
-#   TURSO_TOKEN = your_token_here
-# Without these, app falls back to local SQLite (data lost on redeploy).
 # ─────────────────────────────────────────────────────────────────────────────
 TURSO_URL   = os.environ.get("TURSO_URL", "")
 TURSO_TOKEN = os.environ.get("TURSO_TOKEN", "")
@@ -124,6 +117,12 @@ def init_db():
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_timestamp ON scans(timestamp)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_result    ON scans(result)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scans_url       ON scans(url)")
+    # ── NEW: persistent user whitelist table ──────────────────────────────────
+    conn.execute("""CREATE TABLE IF NOT EXISTS user_whitelist (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        domain    TEXT UNIQUE,
+        added_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
     conn.commit()
     conn.close()
     log.info(f"Database ready ({'Turso cloud' if TURSO_OK else f'local SQLite: {DB}'})")
@@ -478,7 +477,7 @@ def get_risk_level(score, final):
 # THREAT FEEDS + AUTO-RETRAIN
 # ─────────────────────────────────────────────────────────────────────────────
 log.info("Loading threat intelligence feeds…")
-blocklist = ThreatFeedManager(refresh_hours=1, lazy=True)   # lazy=True saves RAM on HF free tier
+blocklist = ThreatFeedManager(refresh_hours=1, lazy=True)
 
 def reload_models_callback():
     load_rf(); load_nn()
@@ -486,6 +485,23 @@ def reload_models_callback():
 
 retrain_watcher = AutoRetrainWatcher(reload_callback=reload_models_callback, interval_minutes=30)
 retrain_watcher.start()
+retrain_watcher.dynamic_whitelist.add("nayanx0013-phishguard-extension.hf.space")
+
+
+# ── NEW: Load user whitelist from DB on startup ───────────────────────────────
+def load_user_whitelist():
+    try:
+        conn = get_db()
+        rows = conn.execute("SELECT domain FROM user_whitelist").fetchall()
+        conn.close()
+        for (domain,) in rows:
+            retrain_watcher.dynamic_whitelist.add(domain)
+        log.info(f"Loaded {len(rows)} user-whitelisted domains from DB")
+    except Exception as e:
+        log.error(f"Failed to load user whitelist: {e}")
+
+load_user_whitelist()
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -507,7 +523,7 @@ def load_rf():
 
 load_rf()
 
-nn_model = None   # onnxruntime InferenceSession
+nn_model = None
 nn_meta  = None
 
 def load_nn():
@@ -524,7 +540,7 @@ def load_nn():
         if saved_size != FEATURE_COUNT:
             log.warning(f"NN expects {saved_size} but features.py gives {FEATURE_COUNT}"); return
         sess_options = ort.SessionOptions()
-        sess_options.intra_op_num_threads = 1   # keep CPU low on free tier
+        sess_options.intra_op_num_threads = 1
         nn_model = ort.InferenceSession("phishnet.onnx", sess_options=sess_options,
                                         providers=["CPUExecutionProvider"])
         log.info(f"ONNX Neural Network loaded (input_size={saved_size})")
@@ -568,7 +584,7 @@ def nn_predict(feats_list):
         from scipy.special import softmax as _softmax
         X_sc = nn_meta["scaler"].transform([feats_list]).astype(np.float32)
         input_name = nn_model.get_inputs()[0].name
-        out   = nn_model.run(None, {input_name: X_sc})[0][0]   # shape (2,)
+        out   = nn_model.run(None, {input_name: X_sc})[0][0]
         probs = _softmax(out)
         pred  = int(np.argmax(probs))
         return ("PHISHING" if pred==1 else "SAFE"), int(probs[pred]*100), float(probs[1])
@@ -832,6 +848,31 @@ def report():
         conn.commit(); conn.close()
         return jsonify({"success":True,"message":f"Reported as {label}"})
     except Exception as e: return jsonify({"error":str(e)}),500
+
+
+# ── NEW: Add domain to persistent whitelist — no retrain triggered ────────────
+@app.route("/whitelist/add", methods=["POST"])
+def whitelist_add():
+    data = request.get_json()
+    if not data or "domain" not in data:
+        return jsonify({"error": "Missing domain"}), 400
+    domain = data["domain"].lower().strip()
+    domain = domain.replace("https://","").replace("http://","").split("/")[0]
+    if not domain or "." not in domain:
+        return jsonify({"error": "Invalid domain"}), 400
+    try:
+        conn = get_db()
+        conn.execute("INSERT OR IGNORE INTO user_whitelist (domain) VALUES (?)", (domain,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.error(f"Whitelist DB error: {e}")
+        return jsonify({"error": str(e)}), 500
+    # Add to runtime memory instantly — no retrain triggered
+    retrain_watcher.dynamic_whitelist.add(domain)
+    log.info(f"Domain whitelisted via extension: {domain}")
+    return jsonify({"success": True, "domain": domain, "message": f"{domain} added to whitelist"})
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 @app.route("/feedback", methods=["POST"])
