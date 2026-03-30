@@ -1,5 +1,3 @@
-
-
 import os
 import sqlite3
 import threading
@@ -21,8 +19,19 @@ MIN_ACCURACY_TO_REPLACE    = 0.88
 DB = "scans.db"
 
 
+# FIX: Use a shared get_db() that respects Turso when configured,
+# instead of always hardcoding sqlite3.connect(DB).
+# If app.py defines get_db, we import it; otherwise fall back to local SQLite.
+def get_db():
+    try:
+        from app import get_db as app_get_db
+        return app_get_db()
+    except Exception:
+        return sqlite3.connect(DB)
+
+
 def init_retrain_db():
-    conn = sqlite3.connect(DB)
+    conn = get_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS verified_urls (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +62,7 @@ def init_retrain_db():
 
 
 def process_new_reports():
-    conn = sqlite3.connect(DB)
+    conn = get_db()
     rows = conn.execute("""
         SELECT url, label, COUNT(*) as cnt
         FROM reports
@@ -111,7 +120,7 @@ def process_new_reports():
 
 
 def get_verified_training_data():
-    conn = sqlite3.connect(DB)
+    conn = get_db()
     rows = conn.execute(
         "SELECT url, label FROM verified_urls WHERE used_in_train = 0"
     ).fetchall()
@@ -120,7 +129,7 @@ def get_verified_training_data():
 
 
 def mark_as_trained(urls):
-    conn = sqlite3.connect(DB)
+    conn = get_db()
     for url in urls:
         conn.execute("UPDATE verified_urls SET used_in_train=1 WHERE url=?", (url,))
     conn.commit()
@@ -128,7 +137,7 @@ def mark_as_trained(urls):
 
 
 def get_verified_safe_domains():
-    conn = sqlite3.connect(DB)
+    conn = get_db()
     rows = conn.execute(
         "SELECT url FROM verified_urls WHERE label='safe' AND used_in_train=1"
     ).fetchall()
@@ -149,7 +158,7 @@ def retrain_model(new_verified_urls, reload_callback=None):
     print("\n🔄 AUTO-RETRAIN TRIGGERED")
     print("=" * 50)
 
-    conn         = sqlite3.connect(DB)
+    conn         = get_db()
     safe_count   = sum(1 for u, l in new_verified_urls if l == "safe")
     phish_count  = sum(1 for u, l in new_verified_urls if l == "phishing")
     log_id       = conn.execute(
@@ -249,7 +258,7 @@ def retrain_model(new_verified_urls, reload_callback=None):
         if accuracy < MIN_ACCURACY_TO_REPLACE:
             print(f"  ⚠️  Accuracy {accuracy:.2%} below threshold {MIN_ACCURACY_TO_REPLACE:.2%}")
             print("  Keeping existing model — new model not good enough")
-            conn = sqlite3.connect(DB)
+            conn = get_db()
             conn.execute(
                 "UPDATE retrain_log SET status='rejected_low_accuracy', accuracy=? WHERE id=?",
                 (round(accuracy, 4), log_id)
@@ -270,7 +279,7 @@ def retrain_model(new_verified_urls, reload_callback=None):
         trained_urls = [url for url, _ in new_verified_urls]
         mark_as_trained(trained_urls)
 
-        conn = sqlite3.connect(DB)
+        conn = get_db()
         conn.execute(
             "UPDATE retrain_log SET status='done', accuracy=? WHERE id=?",
             (round(accuracy, 4), log_id)
@@ -292,7 +301,7 @@ def retrain_model(new_verified_urls, reload_callback=None):
         if os.path.exists("model_backup.pkl") and not os.path.exists("model.pkl"):
             os.rename("model_backup.pkl", "model.pkl")
             print("  Restored backup model")
-        conn = sqlite3.connect(DB)
+        conn = get_db()
         conn.execute("UPDATE retrain_log SET status='failed' WHERE id=?", (log_id,))
         conn.commit()
         conn.close()
@@ -368,7 +377,7 @@ class AutoRetrainWatcher:
         return domain_clean in self.dynamic_whitelist
 
     def get_status(self):
-        conn = sqlite3.connect(DB)
+        conn = get_db()
         pending_safe      = conn.execute("SELECT COUNT(DISTINCT url) FROM reports WHERE label='safe' AND used_in_verify=0").fetchone()[0]
         pending_phishing  = conn.execute("SELECT COUNT(DISTINCT url) FROM reports WHERE label='phishing' AND used_in_verify=0").fetchone()[0]
         verified_safe     = conn.execute("SELECT COUNT(*) FROM verified_urls WHERE label='safe'").fetchone()[0]

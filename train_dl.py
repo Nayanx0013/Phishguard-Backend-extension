@@ -1,5 +1,3 @@
-
-
 import os
 import pickle
 import numpy as np
@@ -11,7 +9,7 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.metrics import accuracy_score, classification_report
 from features import extract_features, features_to_list, get_feature_count
 
-INPUT_SIZE = get_feature_count()   # Auto-detects from features.py (28)
+INPUT_SIZE = get_feature_count()  
 
 print("=" * 60)
 print(f"  PhishGuard Neural Network Trainer v4.0")
@@ -198,6 +196,17 @@ if __name__ == "__main__":
             "scaler":     scaler
         }, f)
 
+    
+    model.eval()
+    dummy = torch.randn(1, INPUT_SIZE)
+    torch.onnx.export(
+        model, dummy, "phishnet.onnx",
+        input_names=["input"],
+        output_names=["output"],
+        dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}}
+    )
+
     print(f"\n✅ lstm_model.pt saved (input_size={INPUT_SIZE})")
     print("✅ char2idx.pkl saved")
+    print("✅ phishnet.onnx exported (for app.py)")
     print("\n🚀 Now restart: python app.py")
