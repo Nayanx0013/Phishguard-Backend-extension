@@ -732,30 +732,66 @@ def predict():
 
     feats_dict["gsb_flagged"] = gsb_flagged
 
-    RF_W,NN_W,VT_W,GSB_W = 0.45,0.25,0.20,0.10
-    nn_p = nn_prob if nn_res else rf_prob
-    if vt["vt_result"] == "UNAVAILABLE":
-        vt_p=0.5; VT_W=0.0; t=RF_W+NN_W+GSB_W
-        RF_W,NN_W,GSB_W = RF_W/t*0.9, NN_W/t*0.9, GSB_W/t*0.9
-    else: vt_p=vt.get("vt_prob",0.0)
+    # ── SMART ENSEMBLE v2.0 ────────────────────────────────────────────────────
+    nn_p  = nn_prob if nn_res else rf_prob
 
-    weighted_score = RF_W*rf_prob + NN_W*nn_p + VT_W*vt_p + (1.0 if gsb_flagged else 0.0)*GSB_W
-    final = "PHISHING" if weighted_score >= 0.55 else "SAFE"
+    # TIER 1 — Hard overrides (always PHISHING, no vote needed)
+    if gsb_flagged:
+        final          = "PHISHING"
+        weighted_score = 0.99
+        votes          = 99
+    elif vt.get("positives", 0) >= 3:
+        final          = "PHISHING"
+        weighted_score = 0.97
+        votes          = 99
+    else:
+        # TIER 2 — Dynamic weights based on model agreement
+        agreement = 1.0 - abs(rf_prob - nn_p)
+        if agreement >= 0.8:
+            RF_W, NN_W, VT_W, GSB_W = 0.60, 0.25, 0.10, 0.05
+        elif agreement >= 0.5:
+            RF_W, NN_W, VT_W, GSB_W = 0.45, 0.20, 0.25, 0.10
+        else:
+            # Models disagree — trust APIs more
+            RF_W, NN_W, VT_W, GSB_W = 0.25, 0.15, 0.45, 0.15
 
-    votes = 0
-    if rf_res=="PHISHING":                          votes+=2
-    if nn_res=="PHISHING":                          votes+=1
-    if vt.get("positives",0)>=3:                   votes+=3
-    elif vt.get("positives",0)>=1:                 votes+=1
-    if gsb_flagged:                                 votes+=3
-    if feats_dict.get("typosquatting"):             votes+=2
-    if feats_dict.get("homograph_attack"):          votes+=2
-    if feats_dict.get("redirect_chain_suspicious"): votes+=1
-    if feats_dict.get("title_brand_mismatch"):      votes+=2
+        if vt["vt_result"] == "UNAVAILABLE":
+            vt_p  = 0.0
+            t     = RF_W + NN_W + GSB_W
+            RF_W, NN_W, GSB_W = RF_W/t, NN_W/t, GSB_W/t
+            VT_W  = 0.0
+        else:
+            vt_p = vt.get("vt_prob", 0.0)
 
-    if votes>=5: final="PHISHING"
-    elif rf_res=="SAFE" and (nn_res=="SAFE" or nn_res is None) \
-         and vt["vt_result"]!="PHISHING" and not gsb_flagged: final="SAFE"
+        weighted_score = RF_W*rf_prob + NN_W*nn_p + VT_W*vt_p + float(gsb_flagged)*GSB_W
+
+        # TIER 3 — Hard URL signals boost
+        votes = 0
+        if rf_res  == "PHISHING": votes += 2
+        if nn_res  == "PHISHING": votes += 1
+        if vt.get("positives", 0) >= 1:  votes += 1
+        if feats_dict.get("typosquatting"):              votes += 2
+        if feats_dict.get("homograph_attack"):           votes += 2
+        if feats_dict.get("redirect_chain_suspicious"):  votes += 1
+        if feats_dict.get("title_brand_mismatch"):       votes += 2
+        if feats_dict.get("suspicious_tld"):             votes += 1
+        if feats_dict.get("brand_impersonation"):        votes += 2
+
+        # Adjust threshold based on model agreement
+        if rf_res == "PHISHING" and nn_res == "PHISHING":
+            phish_threshold = 0.42   # both agree — lower threshold
+        else:
+            phish_threshold = 0.62   # only one says phishing — need strong signal
+
+        if weighted_score >= phish_threshold or votes >= 5:
+            final = "PHISHING"
+        elif weighted_score >= 0.38 and votes >= 2:
+            final = "SUSPICIOUS"
+        elif rf_res == "SAFE" and (nn_res == "SAFE" or nn_res is None) \
+             and vt["vt_result"] != "PHISHING":
+            final = "SAFE"
+        else:
+            final = "SUSPICIOUS" if weighted_score >= 0.35 else "SAFE"
 
     avg_conf = int(max(rf_conf, nn_conf or 0))
     reasons  = build_reasons(feats_dict, rf_res, nn_res, vt, gsb_flagged, final)
@@ -768,7 +804,7 @@ def predict():
     log.info(f"[{g.request_id}] {url[:60]} → {final} (score={weighted_score:.3f}, votes={votes})")
 
     result = {
-        "url":url,"result":final,"confidence":avg_conf,
+        "url":url,"result":final,"confidence":avg_conf,"is_suspicious":final=="SUSPICIOUS",
         "weighted_score":round(weighted_score,3),"risk":risk,"reasons":reasons,
         "models":{
             "random_forest":rf_res,"lstm":nn_res or "unavailable",
