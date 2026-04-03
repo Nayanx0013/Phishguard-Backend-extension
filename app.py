@@ -65,7 +65,7 @@ _db_dir = os.path.dirname(DB)
 if _db_dir and not os.path.exists(_db_dir):
     os.makedirs(_db_dir, exist_ok=True)
 
-def _key_ok(k): return bool(k and len(k) > 10)
+def _key_ok(k): return bool(k and len(k.strip()) >= 4)
 
 log.info(f"VT API:  {'loaded' if _key_ok(VT_API_KEY)   else 'missing'}")
 log.info(f"GSB API: {'loaded' if _key_ok(GSB_API_KEY)  else 'missing'}")
@@ -1054,6 +1054,14 @@ def reload_models():
     if err: return err
     load_rf(); load_nn()
     return jsonify({"rf":rf_model is not None,"nn":nn_model is not None})
+
+
+@app.route("/admin/verify", methods=["POST"])
+def admin_verify():
+    """Let the extension verify if a given admin key is valid."""
+    err = _require_admin()
+    if err: return err
+    return jsonify({"success": True, "message": "Admin key verified ✓"})
 
 
 @app.route("/retrain/status", methods=["GET"])
