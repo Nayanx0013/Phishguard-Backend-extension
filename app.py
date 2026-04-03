@@ -633,12 +633,17 @@ def log_request(response):
     return response
 
 def _require_admin():
-    if not _key_ok(ADMIN_API_KEY): return None
-    provided = request.headers.get("X-Admin-Key","")
+    # If ADMIN_API_KEY is not configured, block ALL admin operations
+    if not _key_ok(ADMIN_API_KEY):
+        return jsonify({"error": "Admin key not configured on server — admin endpoints disabled"}), 403
+    # Get key from header or JSON body
+    provided = request.headers.get("X-Admin-Key", "")
     if not provided and request.is_json:
-        provided = (request.get_json() or {}).get("admin_key","")
-    if provided != ADMIN_API_KEY:
-        return jsonify({"error":"Unauthorized — X-Admin-Key required"}), 403
+        provided = (request.get_json() or {}).get("admin_key", "")
+    # Constant-time comparison to prevent timing attacks
+    import hmac
+    if not provided or not hmac.compare_digest(provided, ADMIN_API_KEY):
+        return jsonify({"error": "Unauthorized — invalid or missing X-Admin-Key"}), 403
     return None
 
 SKIP = ("chrome://","about:","chrome-extension://","moz-extension://",

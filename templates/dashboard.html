@@ -491,16 +491,23 @@ function sendFeedback(correctLabel){
 
 document.getElementById('si').addEventListener('keydown',function(e){if(e.key==='Enter')doScan()});
 
-// ── Retrain Trigger ───────────────────────────────────────────────────────────
+// ── Retrain Trigger (requires admin key) ──────────────────────────────────────
 function doRetrain(){
   var b=document.querySelector('.rtbtn');
+  var key=prompt('Enter Admin API Key to trigger retrain:');
+  if(!key||!key.trim()){b.textContent='⚠ Cancelled';setTimeout(function(){b.textContent='⚡ TRIGGER RETRAIN'},2000);return;}
   b.textContent='⏳ RETRAINING…';b.disabled=true;
-  fetch('/retrain/trigger',{method:'POST'})
+  fetch('/retrain/trigger',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Admin-Key':key.trim()},
+    body:JSON.stringify({})
+  })
     .then(function(r){return r.json()})
     .then(function(d){
-      b.textContent=d.status==='triggered'?'✓ RETRAIN STARTED':'⚠ '+d.message;
+      if(d.error){b.textContent='🔒 '+d.error;}
+      else{b.textContent=d.status==='triggered'?'✓ RETRAIN STARTED':'⚠ '+(d.message||d.status);}
       setTimeout(function(){b.textContent='⚡ TRIGGER RETRAIN';b.disabled=false},3000);
-    }).catch(function(){b.textContent='⚠ OFFLINE';setTimeout(function(){b.textContent='⚡ TRIGGER RETRAIN';b.disabled=false},3000)});
+    }).catch(function(){b.textContent='⚠ OFFLINE';setTimeout(function(){b.textContent='⚡ TRIGGER RETRAIN';b.disabled=false},3000);});
 }
 
 /* AUTO REFRESH — fetch stats every 60s instead of hard reload (FIX L3) */
