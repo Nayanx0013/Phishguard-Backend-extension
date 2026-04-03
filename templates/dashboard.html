@@ -503,8 +503,13 @@ function doRetrain(){
     }).catch(function(){b.textContent='⚠ OFFLINE';setTimeout(function(){b.textContent='⚡ TRIGGER RETRAIN';b.disabled=false},3000)});
 }
 
-/* AUTO REFRESH 30s */
-setTimeout(function(){location.reload()},30000);
+/* AUTO REFRESH — fetch stats every 60s instead of hard reload (FIX L3) */
+setInterval(function(){
+  fetch('/stats').then(function(r){return r.json()}).then(function(d){
+    var el=document.querySelector('.stat-total');
+    if(el) el.textContent=d.total||0;
+  }).catch(function(){});
+},60000);
 </script>
 </body>
 </html>

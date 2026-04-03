@@ -130,7 +130,12 @@ def init_db():
 
 def _check_db():
     try:
-        conn = get_db(); conn.execute("SELECT 1"); conn.close(); return True
+        conn = get_db()
+        try:
+            conn.execute("SELECT 1")
+        finally:
+            conn.close()
+        return True
     except Exception: return False
 
 
@@ -139,11 +144,14 @@ def log_scan(url, result, ml_result, lstm_result, vt_result, confidence, vt_rati
         return
     try:
         conn = get_db()
-        conn.execute(
-            "INSERT INTO scans (url,result,ml_result,lstm_result,vt_result,confidence,vt_ratio) VALUES (?,?,?,?,?,?,?)",
-            (url, result, ml_result, lstm_result, vt_result, confidence, vt_ratio),
-        )
-        conn.commit(); conn.close()
+        try:
+            conn.execute(
+                "INSERT INTO scans (url,result,ml_result,lstm_result,vt_result,confidence,vt_ratio) VALUES (?,?,?,?,?,?,?)",
+                (url, result, ml_result, lstm_result, vt_result, confidence, vt_ratio),
+            )
+            conn.commit()
+        finally:
+            conn.close()
     except Exception as e:
         log.error(f"DB write error: {e}")
 
@@ -188,27 +196,48 @@ gsb_breaker = CircuitBreaker("GoogleSafeBrowsing", failure_threshold=5, reset_se
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CACHE + RATE LIMITER
+# CACHE + RATE LIMITER  (FIX: bounded cache, SHA256, rate cleanup)
 # ─────────────────────────────────────────────────────────────────────────────
 _scan_cache: dict = {}
-CACHE_TTL = 300
+CACHE_TTL      = 300
+CACHE_MAX_SIZE = 10_000
+
+def _cache_key(url):
+    return hashlib.sha256(url.encode()).hexdigest()
 
 def _cache_get(url):
-    e = _scan_cache.get(hashlib.md5(url.encode()).hexdigest())
-    return e["data"] if e and time.time()-e["ts"]<CACHE_TTL else None
+    e = _scan_cache.get(_cache_key(url))
+    if e and time.time()-e["ts"]<CACHE_TTL:
+        return e["data"]
+    if e:
+        _scan_cache.pop(_cache_key(url), None)   # evict stale
+    return None
 
 def _cache_set(url, data):
-    _scan_cache[hashlib.md5(url.encode()).hexdigest()] = {"data": data, "ts": time.time()}
+    # Evict oldest entries if cache exceeds max size
+    if len(_scan_cache) >= CACHE_MAX_SIZE:
+        oldest_keys = sorted(_scan_cache, key=lambda k: _scan_cache[k]["ts"])[:1000]
+        for k in oldest_keys:
+            _scan_cache.pop(k, None)
+    _scan_cache[_cache_key(url)] = {"data": data, "ts": time.time()}
 
 def _cache_invalidate(url):
-    _scan_cache.pop(hashlib.md5(url.encode()).hexdigest(), None)
+    _scan_cache.pop(_cache_key(url), None)
 
 _rate_store: dict = defaultdict(list)
 _rate_lock        = threading.Lock()
+_rate_last_cleanup = time.time()
 
 def _is_rate_limited(ip, limit=30, window=60):
     now = time.time()
     with _rate_lock:
+        # Periodic cleanup of stale IPs (every 5 min)
+        global _rate_last_cleanup
+        if now - _rate_last_cleanup > 300:
+            stale = [k for k, v in _rate_store.items() if not v or now - v[-1] > window]
+            for k in stale:
+                del _rate_store[k]
+            _rate_last_cleanup = now
         calls = [t for t in _rate_store[ip] if now-t<window]
         _rate_store[ip] = calls
         if len(calls) >= limit: return True
@@ -625,7 +654,7 @@ _metrics = _Counter()
 def api_root():
     stats = blocklist.get_stats()
     return jsonify({
-        "status":"running","version":"5.0",
+        "status":"running","version":"5.1.0",
         "rf_model":rf_model is not None,"nn_model":nn_model is not None,
         "vt_enabled":_key_ok(VT_API_KEY),"gsb_enabled":_key_ok(GSB_API_KEY),
         "threat_feeds":stats["total_entries"],"feature_count":FEATURE_COUNT,
@@ -877,33 +906,43 @@ def report():
         return jsonify({"error":"Missing url or label"}),400
     label = data["label"].lower().strip()
     if label not in ("safe","phishing"): return jsonify({"error":"Label must be 'safe' or 'phishing'"}),400
+    url = data["url"][:2048]  # FIX M2: length limit
+    note = data.get("note","")[:500]  # FIX M2: length limit
+    conn = get_db()
     try:
-        conn=get_db()
         conn.execute("INSERT INTO reports (url,label,note) VALUES (?,?,?)",
-                     (data["url"],label,data.get("note","")))
-        conn.commit(); conn.close()
-        return jsonify({"success":True,"message":f"Reported as {label}"})
-    except Exception as e: return jsonify({"error":str(e)}),500
+                     (url, label, note))
+        conn.commit()
+    except Exception as e:
+        return jsonify({"error":str(e)}),500
+    finally:
+        conn.close()
+    return jsonify({"success":True,"message":f"Reported as {label}"})
 
 
-# ── NEW: Add domain to persistent whitelist — no retrain triggered ────────────
+# ── Add domain to persistent whitelist — FIX H4: requires admin or rate-limit ──
 @app.route("/whitelist/add", methods=["POST"])
 def whitelist_add():
+    # FIX H4: Rate-limit whitelist additions per IP
+    ip = request.headers.get("X-Forwarded-For",request.remote_addr)
+    if _is_rate_limited(ip, limit=10, window=60):
+        return jsonify({"error":"Rate limited — try later"}), 429
     data = request.get_json()
     if not data or "domain" not in data:
         return jsonify({"error": "Missing domain"}), 400
-    domain = data["domain"].lower().strip()
+    domain = data["domain"].lower().strip()[:253]  # FIX M2: length limit
     domain = domain.replace("https://","").replace("http://","").split("/")[0]
     if not domain or "." not in domain:
         return jsonify({"error": "Invalid domain"}), 400
+    conn = get_db()
     try:
-        conn = get_db()
         conn.execute("INSERT OR IGNORE INTO user_whitelist (domain) VALUES (?)", (domain,))
         conn.commit()
-        conn.close()
     except Exception as e:
         log.error(f"Whitelist DB error: {e}")
         return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
     # Add to runtime memory instantly — no retrain triggered
     retrain_watcher.dynamic_whitelist.add(domain)
     log.info(f"Domain whitelisted via extension: {domain}")
@@ -919,10 +958,15 @@ def feedback():
     label=data["correct_label"].lower().strip()
     if label not in ("safe","phishing"): return jsonify({"error":"correct_label must be 'safe' or 'phishing'"}),400
     _cache_invalidate(data["url"])
+    url = data["url"][:2048]  # FIX M2: length limit
+    note = f"[feedback] was {data['reported_label']}, correct={label}. {data.get('note','')}"[:500]
     conn=get_db()
-    conn.execute("INSERT INTO reports (url,label,note) VALUES (?,?,?)",
-                 (data["url"],label,f"[feedback] was {data['reported_label']}, correct={label}. {data.get('note','')}"))
-    conn.commit(); conn.close()
+    try:
+        conn.execute("INSERT INTO reports (url,label,note) VALUES (?,?,?)",
+                     (url, label, note))
+        conn.commit()
+    finally:
+        conn.close()
     log.info(f"[{g.request_id}] Feedback: {data['url'][:60]} correct={label}")
     return jsonify({"success":True,"message":"Thank you — this improves accuracy!"})
 
@@ -931,10 +975,13 @@ def feedback():
 def history():
     limit=min(int(request.args.get("limit",50)),1000)
     conn=get_db()
-    rows=conn.execute(
-        "SELECT url,result,ml_result,lstm_result,vt_result,confidence,vt_ratio,timestamp "
-        "FROM scans ORDER BY timestamp DESC LIMIT ?",(limit,)
-    ).fetchall(); conn.close()
+    try:
+        rows=conn.execute(
+            "SELECT url,result,ml_result,lstm_result,vt_result,confidence,vt_ratio,timestamp "
+            "FROM scans ORDER BY timestamp DESC LIMIT ?",(limit,)
+        ).fetchall()
+    finally:
+        conn.close()
     return jsonify([{"url":r[0],"result":r[1],"ml_result":r[2],"lstm_result":r[3],
                      "vt_result":r[4],"confidence":r[5],"vt_ratio":r[6],"timestamp":r[7]} for r in rows])
 
@@ -942,42 +989,53 @@ def history():
 @app.route("/stats", methods=["GET"])
 def stats():
     conn=get_db()
-    total=conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
-    phishing=conn.execute("SELECT COUNT(*) FROM scans WHERE result='PHISHING'").fetchone()[0]
-    conn.close()
-    return jsonify({"total":total,"phishing":phishing,"safe":total-phishing,
+    try:
+        total=conn.execute("SELECT COUNT(*) FROM scans").fetchone()[0]
+        phishing=conn.execute("SELECT COUNT(*) FROM scans WHERE result='PHISHING'").fetchone()[0]
+        suspicious=conn.execute("SELECT COUNT(*) FROM scans WHERE result='SUSPICIOUS'").fetchone()[0]
+    finally:
+        conn.close()
+    safe = total - phishing - suspicious
+    return jsonify({"total":total,"phishing":phishing,"suspicious":suspicious,"safe":safe,
                     "phishing_rate":round(phishing/total*100,1) if total else 0})
 
 
 @app.route("/dashboard")
 def dashboard():
     conn=get_db()
-    row=conn.execute("""
-        SELECT COUNT(*),SUM(CASE WHEN result='PHISHING' THEN 1 ELSE 0 END),SUM(CASE WHEN result='SAFE' THEN 1 ELSE 0 END)
-        FROM scans WHERE url NOT LIKE 'http://localhost%' AND url NOT LIKE 'chrome://%' AND url NOT LIKE 'about:%'
-    """).fetchone()
-    recent=conn.execute(
-        "SELECT url,result,ml_result,lstm_result,vt_result,confidence,vt_ratio,timestamp "
-        "FROM scans WHERE url NOT LIKE 'chrome://%' AND url NOT LIKE 'about:%' "
-        "ORDER BY timestamp DESC LIMIT 50"
-    ).fetchall()
-    daily=conn.execute("""
-        SELECT DATE(timestamp),COUNT(*),SUM(CASE WHEN result='PHISHING' THEN 1 ELSE 0 END)
-        FROM scans WHERE url NOT LIKE 'http://localhost%' AND url NOT LIKE 'chrome://%'
-        GROUP BY DATE(timestamp) ORDER BY DATE(timestamp) DESC LIMIT 7
-    """).fetchall()
-    top_domains=conn.execute("""
-        SELECT REPLACE(REPLACE(
-            SUBSTR(url,INSTR(url,'://')+3,
-            CASE WHEN INSTR(SUBSTR(url,INSTR(url,'://')+3),'/')>0
-                 THEN INSTR(SUBSTR(url,INSTR(url,'://')+3),'/')-1
-                 ELSE LENGTH(url) END),'www.',''),'http://','') as domain,
-            COUNT(*) as cnt
-        FROM scans WHERE result='PHISHING' AND url NOT LIKE 'http://localhost%'
-        GROUP BY domain ORDER BY cnt DESC LIMIT 8
-    """).fetchall(); conn.close()
+    try:
+        row=conn.execute("""
+            SELECT COUNT(*),
+                   SUM(CASE WHEN result='PHISHING' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN result='SAFE' THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN result='SUSPICIOUS' THEN 1 ELSE 0 END)
+            FROM scans WHERE url NOT LIKE 'http://localhost%' AND url NOT LIKE 'chrome://%' AND url NOT LIKE 'about:%'
+        """).fetchone()
+        recent=conn.execute(
+            "SELECT url,result,ml_result,lstm_result,vt_result,confidence,vt_ratio,timestamp "
+            "FROM scans WHERE url NOT LIKE 'chrome://%' AND url NOT LIKE 'about:%' "
+            "ORDER BY timestamp DESC LIMIT 50"
+        ).fetchall()
+        daily=conn.execute("""
+            SELECT DATE(timestamp),COUNT(*),SUM(CASE WHEN result='PHISHING' THEN 1 ELSE 0 END)
+            FROM scans WHERE url NOT LIKE 'http://localhost%' AND url NOT LIKE 'chrome://%'
+            GROUP BY DATE(timestamp) ORDER BY DATE(timestamp) DESC LIMIT 7
+        """).fetchall()
+        top_domains=conn.execute("""
+            SELECT REPLACE(REPLACE(
+                SUBSTR(url,INSTR(url,'://')+3,
+                CASE WHEN INSTR(SUBSTR(url,INSTR(url,'://')+3),'/')>0
+                     THEN INSTR(SUBSTR(url,INSTR(url,'://')+3),'/')-1
+                     ELSE LENGTH(url) END),'www.',''),'http://','') as domain,
+                COUNT(*) as cnt
+            FROM scans WHERE result='PHISHING' AND url NOT LIKE 'http://localhost%'
+            GROUP BY domain ORDER BY cnt DESC LIMIT 8
+        """).fetchall()
+    finally:
+        conn.close()
     return render_template("dashboard.html",
         total=row[0] or 0, phishing=row[1] or 0, safe=row[2] or 0,
+        suspicious=row[3] or 0,
         recent=recent, daily=list(reversed(daily)), top_domains=top_domains,
         rf_loaded=rf_model is not None, lstm_loaded=nn_model is not None,
         vt_enabled=_key_ok(VT_API_KEY), gsb_enabled=_key_ok(GSB_API_KEY),
@@ -1017,10 +1075,13 @@ def retrain_trigger():
 @app.route("/retrain/reports", methods=["GET"])
 def retrain_reports():
     conn=get_db()
-    rows=conn.execute("""
-        SELECT url,label,COUNT(*) as cnt,MAX(timestamp) as last_report,MIN(used_in_verify) as processed
-        FROM reports GROUP BY url,label ORDER BY cnt DESC,last_report DESC LIMIT 100
-    """).fetchall(); conn.close()
+    try:
+        rows=conn.execute("""
+            SELECT url,label,COUNT(*) as cnt,MAX(timestamp) as last_report,MIN(used_in_verify) as processed
+            FROM reports GROUP BY url,label ORDER BY cnt DESC,last_report DESC LIMIT 100
+        """).fetchall()
+    finally:
+        conn.close()
     from auto_retrain import SAFE_REPORT_THRESHOLD, PHISHING_REPORT_THRESHOLD
     results=[]
     for url,label,cnt,last,processed in rows:
@@ -1034,5 +1095,5 @@ def retrain_reports():
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     port=int(os.environ.get("PORT", 7860))
-    log.info(f"PhishGuard API v5.0 starting on port {port}")
+    log.info(f"PhishGuard API v5.1.0 starting on port {port}")
     app.run(debug=False, host="0.0.0.0", port=port, threaded=True)
